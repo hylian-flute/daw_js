@@ -1,6 +1,6 @@
 "use strict";
 
-// ループが規定時間以内に終わらなかったらプログラムを強制終了
+// ループが規定時間以内に終わらなかったときにプログラムを強制終了する処理
 const timeCheck = (() => {
   let s = Date.now();
   return {
@@ -23,7 +23,7 @@ class Note {
 
 // 音符インスタンスの配列からなる楽譜を得る
 const getScore = sampleRate => {
-  const tempo = 180;
+  const tempo = 185;
 
   // 1小節のフレーム数
   const oneBarFrame = 240*sampleRate/tempo;
@@ -88,12 +88,61 @@ const getScore = sampleRate => {
       ["E3", 7, 1],
       ["G3", 7, 1],
     ],
+
+    // スネア
+    [
+      ["C4", 0 + 1/4, 1/8],
+      ["C4", 0 + 3/4, 1/8],
+      ["C4", 1 + 1/4, 1/8],
+      ["C4", 1 + 3/4, 1/8],
+      ["C4", 2 + 1/4, 1/8],
+      ["C4", 2 + 3/4, 1/8],
+      ["C4", 3 + 1/4, 1/8],
+      ["C4", 3 + 3/4, 1/8],
+      ["C4", 4 + 1/4, 1/8],
+      ["C4", 4 + 3/4, 1/8],
+      ["C4", 5 + 1/4, 1/8],
+      ["C4", 5 + 3/4, 1/8],
+      ["C4", 6 + 1/4, 1/8],
+      ["C4", 6 + 3/4, 1/8],
+      ["C4", 7 + 1/4, 1/8],
+      ["C4", 7 + 3/4, 1/8],
+    ],
+
+    // バスドラム
+    [
+      ["A1", 0 + 0/4, 1/8],
+      ["A1", 0 + 2/4, 1/8],
+      ["A1", 0 + 5/8, 1/8],
+      ["A1", 1 + 1/8, 1/8],
+      ["A1", 1 + 2/4, 1/8],
+      ["A1", 1 + 5/8, 1/8],
+      ["A1", 2 + 0/4, 1/8],
+      ["A1", 2 + 2/4, 1/8],
+      ["A1", 2 + 5/8, 1/8],
+      ["A1", 3 + 1/8, 1/8],
+      ["A1", 3 + 2/4, 1/8],
+      ["A1", 3 + 5/8, 1/8],
+      ["A1", 4 + 0/4, 1/8],
+      ["A1", 4 + 2/4, 1/8],
+      ["A1", 4 + 5/8, 1/8],
+      ["A1", 5 + 1/8, 1/8],
+      ["A1", 5 + 2/4, 1/8],
+      ["A1", 5 + 5/8, 1/8],
+      ["A1", 6 + 0/4, 1/8],
+      ["A1", 6 + 2/4, 1/8],
+      ["A1", 6 + 5/8, 1/8],
+      ["A1", 7 + 1/8, 1/8],
+      ["A1", 7 + 2/4, 1/8],
+      ["A1", 7 + 5/8, 1/8],
+    ],
   ].map(noteArr => noteArr.map(n => new Note(...n, oneBarFrame)));
 };
 
 // 波形を得る, rad: 波長=2*PIの時刻, t: 時刻(秒)
 const getWaveformArr = () => {
   return [
+    // スーパーソー
     (rad, t) => {
       const p = rad % (2 * Math.PI);
       const p2 = (rad * 1.005) % (2 * Math.PI)
@@ -102,6 +151,8 @@ const getWaveformArr = () => {
         + 1 / Math.PI * p2 - 1
       )/2;
     },
+
+    // 三角波
     (rad, t) => {
       const p = rad %= 2 * Math.PI;
       return (
@@ -110,6 +161,13 @@ const getWaveformArr = () => {
         : -2 / Math.PI * p + 3
       );
     },
+
+    // 減衰するホワイトノイズ
+    (rad, t) => (Math.random() * 2 - 1) * (1 / (64 * t + 1)),
+
+    // 減衰するサイン波
+    (rad, t) => (Math.sin(rad) + (Math.random() * 2 - 1)/4)
+      * (1 / (32  * t + 1)),
   ];
 };
 
@@ -138,9 +196,31 @@ const generateBuffer = audioCtx => {
   const freqMap = new Map();
   score.flat().forEach(note => {
     if (freqMap.has(note.tone)) return 0;
-    const toneNum = toneNameMap.get(note.tone.match(/^[A-G][#b]?/)[0])
-      + 12 * (parseInt(note.tone.match(/-?\d+$/)[0], 10) - 4);
-    freqMap.set(note.tone, 440 * 2 ** (toneNum / 12));
+    const freq = (() => {
+      const keyNum = toneNameMap.get(note.tone.match(/^[A-G][#b]?/)[0]);
+      const octave = parseInt(note.tone.match(/-?\d+$/)[0], 10) - 4;
+      return 440 * 2 ** ((keyNum + 12 * octave) / 12);
+    })();
+    freqMap.set(note.tone, freq);
+  });
+
+  // 各トラックと音程に対応する波形を保存するマップ
+  const waveformArr = getWaveformArr();
+  const waveMap = new Map();
+  score.forEach((noteArr, track) => {
+    noteArr.forEach(note => {
+      const key = `${track}-${note.tone}`;
+      const wave = (waveMap.has(key) ? waveMap.get(key) : []);
+      if (wave.length >= note.time) return 0;
+
+      for (let t = wave.length; t < note.time; ++t) {
+        wave.push(waveformArr[track](
+          2 * Math.PI * t * freqMap.get(note.tone) / audioCtx.sampleRate,
+          t/audioCtx.sampleRate,
+        ));
+      }
+      waveMap.set(key, wave);
+    });
   });
 
   const channelNum= 2;
@@ -152,17 +232,14 @@ const generateBuffer = audioCtx => {
     ),
     audioCtx.sampleRate
   ); 
-  const waveformArr = getWaveformArr();
 
   for (let ch = 0; ch < channelNum; ++ch) {
     const channelData = buffer.getChannelData(ch);
     score.forEach((noteArr, track) => {
       noteArr.forEach(note => {
+        const wave = waveMap.get(`${track}-${note.tone}`);
         for (let t = 0; t < note.time; ++t) {
-          channelData[note.start + t] += waveformArr[track](
-            2 * Math.PI * t * freqMap.get(note.tone) / audioCtx.sampleRate,
-            t/audioCtx.sampleRate,
-          );
+          channelData[note.start + t] += wave[t];
         }
         timeCheck.check();
       });
