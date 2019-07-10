@@ -268,22 +268,34 @@ const generateBuffer = audioCtx => {
 // スタートボタンを押されたときの処理
 const start = () => {
   const startTime = Date.now();
-  if (!window.AudioContext) {
+  if (!window.AudioContext && !window.webkitAudioContext) {
     window.alert("非対応ブラウザ");
     return 0;
   }
-  const audioCtx = new window.AudioContext();
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   const source = audioCtx.createBufferSource();
   source.buffer = generateBuffer(audioCtx);
   source.connect(audioCtx.destination);
 
-  // 停止ボタンの処理を設定
-  document.querySelector("#stop-button").onclick = () => source.stop();
+  // 停止ボタンの処理
+  const button = document.querySelector("button");
+  button.onclick = () => {
+    source.stop();
+    button.onclick = start;
+    button.innerHTML = "Start";
+  };
+  button.innerHTML = "Stop";
+
+  // 再生終了時の処理
+  source.onended = () => {
+    button.onclick = start;
+    button.innerHTML = "Start";
+  };
 
   source.start();
   console.log(`Total time: ${Date.now() - startTime}ms`);
 };
 
 window.onload = () => {
-  document.querySelector("#start-button").onclick = start;
+  document.querySelector("button").onclick = start;
 };
